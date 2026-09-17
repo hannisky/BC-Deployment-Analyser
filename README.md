@@ -136,9 +136,4 @@ See [`docs/examples/`](./docs/examples/) for rendered samples.
 | Security | Read-only GitHub PAT on a bot account, partner-tenant app registration with GDAP, Entra ID for Foundry, dedicated resource group, secrets never in the repo |
 | Safety | Foundry content filters on both agents; output is documentation reviewed by consultants, no write actions against customer systems |
 
-## Origin
 
-This solution productionises the [Git-Knowledge-Connector](https://github.com/InBizDev/Git-Knowledge-Connector)
-proof of concept (one plain `openai` call per repository, no tracing, no evaluation) using the patterns from the
-[Microsoft Foundry FrontierWeekHack labs](https://github.com/microsoft/FrontierWeekHack): setup → build → monitor
-→ evaluate → orchestrate.
