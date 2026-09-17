@@ -1,0 +1,13 @@
+{
+  "_comment": "Business Central auth. Copy to bc_config.json (gitignored). Env vars BC_CLIENT_ID / BC_CLIENT_SECRET / BC_TENANT_ID / BC_ENVIRONMENT / BC_COMPANY_NAME / BC_OWN_PUBLISHER take precedence when set.",
+  "azure_ad": {
+    "tenant_id": "<default customer tenant id — used when a customer has no bc_environments[] entry>",
+    "client_id": "<app registration in the partner tenant>",
+    "client_secret": "<client secret — prefer env var BC_CLIENT_SECRET>"
+  },
+  "bc": {
+    "environment": "Production",
+    "company_name": "<any company in the environment — apps are installed environment-wide>",
+    "own_publisher": "<your AL publisher name, e.g. InBiz>"
+  }
+}

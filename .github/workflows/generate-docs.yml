@@ -1,0 +1,98 @@
+# =============================================================================
+# BC Deployment Analyzer — scheduled documentation pipeline
+#
+# Runs discovery (GitHub + Business Central) and the two-agent documentation
+# pipeline, then commits the generated Markdown back to this repository so the
+# Microsoft 365 Copilot GitHub connector can index it.
+#
+# Required repository secrets:
+#   AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID   OIDC federated identity with
+#                                                              the Azure AI User role on the Foundry account
+#   PROJECT_CONNECTION_STRING, MODEL_DEPLOYMENT_NAME, APPLICATIONINSIGHTS_CONNECTION_STRING
+#   DOCS_BOT_GITHUB_TOKEN     fine-grained PAT of the docs bot (read access to customer repos)
+#   BC_CLIENT_ID / BC_CLIENT_SECRET / BC_OWN_PUBLISHER
+#   REPOS_CONFIG_JSON         contents of discovery/repos_config.json (customers + tenants)
+#
+# To commit output/, remove the `output/*` ignore rule from .gitignore.
+# =============================================================================
+name: Generate BC documentation
+
+on:
+  schedule:
+    - cron: "17 3 * * 1-5"        # weekdays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: "Only this customer (leave empty for all)"
+        required: false
+        default: ""
+      force:
+        description: "Regenerate all documentation"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: generate-docs
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PROJECT_CONNECTION_STRING: ${{ secrets.PROJECT_CONNECTION_STRING }}
+      MODEL_DEPLOYMENT_NAME: ${{ secrets.MODEL_DEPLOYMENT_NAME }}
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
+      AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING: "true"
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "true"
+      GITHUB_TOKEN: ${{ secrets.DOCS_BOT_GITHUB_TOKEN }}
+      BC_CLIENT_ID: ${{ secrets.BC_CLIENT_ID }}
+      BC_CLIENT_SECRET: ${{ secrets.BC_CLIENT_SECRET }}
+      BC_OWN_PUBLISHER: ${{ secrets.BC_OWN_PUBLISHER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Azure login (OIDC → DefaultAzureCredential)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Restore customer inventory
+        run: echo "$REPOS_CONFIG_JSON" > discovery/repos_config.json
+        env:
+          REPOS_CONFIG_JSON: ${{ secrets.REPOS_CONFIG_JSON }}
+
+      - name: Discover + document
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.customer }}" ]; then ARGS="$ARGS --customer \"${{ inputs.customer }}\""; fi
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          eval python orchestration/run_pipeline.py --discover $ARGS
+
+      - name: Quality gate (deterministic checks on the reference dataset)
+        run: python evaluation/evaluate.py --offline --no-llm-judge
+
+      - name: Commit generated documentation
+        run: |
+          git config user.name "bc-docs-bot"
+          git config user.email "bc-docs-bot@users.noreply.github.com"
+          git add output/ || true
+          if git diff --cached --quiet; then
+            echo "No documentation changes."
+          else
+            git commit -m "docs: regenerate BC documentation ($(date -u +%Y-%m-%d))"
+            git push
+          fi

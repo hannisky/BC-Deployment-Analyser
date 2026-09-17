@@ -1,0 +1,32 @@
+# --- Secrets and local configuration — never commit ---------------------------
+.env
+.env.*
+!.env.example
+discovery/bc_config.json
+discovery/repos_config.json
+discovery/known_extensions.json
+*.pem
+*.pfx
+
+# --- Generated documentation -------------------------------------------------
+# Delete the two lines below if you want generated docs committed to this repo
+# (e.g. so the Microsoft 365 Copilot GitHub connector can index them).
+output/*
+!output/.gitkeep
+
+# --- Evaluation runs -----------------------------------------------------------
+evaluation/results/
+
+# --- Python ---------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# --- IDE / OS ------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+{
+  "_comment": "Optional lookup used by discover_bc_extensions.py for the 'Beskrivning' column of third-party extensions. Key = displayName as reported by Business Central (case-insensitive). Copy to known_extensions.json.",
+  "Example ISV App": {
+    "description": "Kort beskrivning av vad tillägget gör och vilka processer hos kunden som använder det.",
+    "url": "https://vendor.example.com/docs"
+  }
+}

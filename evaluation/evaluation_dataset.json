@@ -1,0 +1,293 @@
+{
+  "_comment": "Evaluation dataset for the BC Deployment Analyzer. Cases are synthetic but mirror real PTE patterns (fictional customer Nordvik Industri AB, publisher Exempelpartner). code_analyst cases carry an `analysis` object shaped like the analyze_repo tool output; change_tracker cases carry a `changes` object shaped like get_repo_changes. `expected` holds deterministic checks + a Swedish reference answer used as ground truth in the portal.",
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "CA-01",
+      "agent": "code_analyst",
+      "title": "Logic codeunit with setup table/page and release trigger (Minimumorderavgift)",
+      "input": {
+        "mode": "full",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-PTE", "branch": "main", "head_sha": "a1b2c3d4e5f6", "url": "https://github.com/exempelpartner/Nordvik-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000001", "name": "Nordvik PTE", "publisher": "Exempelpartner", "version": "27.2.0.0", "brief": "Kundanpassningar för Nordvik Industri AB", "dependencies": []},
+          "summary": {"al_files": 4, "objects_by_type": {"codeunit": 1, "table": 1, "page": 1, "pageextension": 1}, "logic_codeunits": 1, "subscriber_codeunits": 0, "event_subscribers": 2, "skipped_install_upgrade": [], "source_omitted_for_budget": []},
+          "logic_codeunits": [
+            {"path": "src/Codeunit/CalcMinimumOrderFee.Codeunit.al", "type": "codeunit", "id": 50100, "name": "NVK Calc Minimum Order Fee", "archetype": "logic", "commented_out": false,
+             "procedures": [{"name": "AddFeeIfBelowMinimum", "public": true}, {"name": "RemoveFee", "public": true}, {"name": "OnAfterReleaseSalesDoc", "public": false}, {"name": "OnAfterReopenSalesDoc", "public": false}],
+             "event_subscribers": [
+               {"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnAfterReleaseSalesDoc", "procedure": "OnAfterReleaseSalesDoc"},
+               {"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnAfterReopenSalesDoc", "procedure": "OnAfterReopenSalesDoc"}]}
+          ],
+          "subscriber_codeunits": [],
+          "tables": [{"path": "src/Table/MinOrderFeeSetup.Table.al", "type": "table", "id": 50100, "name": "NVK Min. Order Fee Setup", "fields": [{"id": 1, "name": "Primary Key", "type": "Code[10]"}, {"id": 10, "name": "Minimum Order Amount", "type": "Decimal"}, {"id": 11, "name": "Fee Item No.", "type": "Code[20]"}, {"id": 12, "name": "Fee Amount", "type": "Decimal"}]}],
+          "pages": [
+            {"path": "src/Page/MinOrderFeeSetup.Page.al", "type": "page", "id": 50100, "name": "NVK Min. Order Fee Setup", "page_type": "Card", "source_table": "NVK Min. Order Fee Setup", "actions": []},
+            {"path": "src/PageExt/SalesOrder.PageExt.al", "type": "pageextension", "id": 50100, "name": "NVK Sales Order", "extends": "Sales Order", "actions": ["NVKRecalcMinFee"]}
+          ],
+          "reports": [],
+          "other_objects": [],
+          "source": "--- src/Codeunit/CalcMinimumOrderFee.Codeunit.al ---\ncodeunit 50100 \"NVK Calc Minimum Order Fee\"\n{\n    procedure AddFeeIfBelowMinimum(var SalesHeader: Record \"Sales Header\")\n    var\n        Setup: Record \"NVK Min. Order Fee Setup\";\n        SalesLine: Record \"Sales Line\";\n        Total: Decimal;\n    begin\n        Setup.Get();\n        if Setup.\"Fee Item No.\" = '' then\n            exit;\n        RemoveFee(SalesHeader);\n        SalesLine.SetRange(\"Document Type\", SalesHeader.\"Document Type\");\n        SalesLine.SetRange(\"Document No.\", SalesHeader.\"No.\");\n        SalesLine.SetRange(Type, SalesLine.Type::Item);\n        SalesLine.CalcSums(\"Line Amount\");\n        Total := SalesLine.\"Line Amount\";\n        if Total >= Setup.\"Minimum Order Amount\" then\n            exit;\n        InsertFeeLine(SalesHeader, Setup);\n    end;\n\n    procedure RemoveFee(var SalesHeader: Record \"Sales Header\")\n    var\n        SalesLine: Record \"Sales Line\";\n    begin\n        SalesLine.SetRange(\"Document Type\", SalesHeader.\"Document Type\");\n        SalesLine.SetRange(\"Document No.\", SalesHeader.\"No.\");\n        SalesLine.SetRange(\"NVK Minimum Order Fee\", true);\n        SalesLine.DeleteAll(true);\n    end;\n\n    local procedure InsertFeeLine(SalesHeader: Record \"Sales Header\"; Setup: Record \"NVK Min. Order Fee Setup\")\n    var\n        SalesLine: Record \"Sales Line\";\n    begin\n        SalesLine.Init();\n        SalesLine.\"Document Type\" := SalesHeader.\"Document Type\";\n        SalesLine.\"Document No.\" := SalesHeader.\"No.\";\n        SalesLine.\"Line No.\" := 990000;\n        SalesLine.Validate(Type, SalesLine.Type::Item);\n        SalesLine.Validate(\"No.\", Setup.\"Fee Item No.\");\n        SalesLine.Validate(Quantity, 1);\n        SalesLine.Validate(\"Unit Price\", Setup.\"Fee Amount\");\n        SalesLine.\"NVK Minimum Order Fee\" := true;\n        SalesLine.Insert(true);\n    end;\n\n    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Release Sales Document\", 'OnAfterReleaseSalesDoc', '', false, false)]\n    local procedure OnAfterReleaseSalesDoc(var SalesHeader: Record \"Sales Header\")\n    begin\n        if SalesHeader.\"Document Type\" = SalesHeader.\"Document Type\"::Order then\n            AddFeeIfBelowMinimum(SalesHeader);\n    end;\n\n    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Release Sales Document\", 'OnAfterReopenSalesDoc', '', false, false)]\n    local procedure OnAfterReopenSalesDoc(var SalesHeader: Record \"Sales Header\")\n    begin\n        RemoveFee(SalesHeader);\n    end;\n}\n\n--- src/Table/MinOrderFeeSetup.Table.al ---\ntable 50100 \"NVK Min. Order Fee Setup\"\n{\n    fields\n    {\n        field(1; \"Primary Key\"; Code[10]) { }\n        field(10; \"Minimum Order Amount\"; Decimal) { Caption = 'Minimum Order Amount'; }\n        field(11; \"Fee Item No.\"; Code[20]) { Caption = 'Fee Item No.'; TableRelation = Item; }\n        field(12; \"Fee Amount\"; Decimal) { Caption = 'Fee Amount'; }\n    }\n    keys { key(PK; \"Primary Key\") { Clustered = true; } }\n}\n\n--- src/Page/MinOrderFeeSetup.Page.al ---\npage 50100 \"NVK Min. Order Fee Setup\"\n{\n    PageType = Card;\n    SourceTable = \"NVK Min. Order Fee Setup\";\n    UsageCategory = Administration;\n    ApplicationArea = All;\n    Caption = 'Minimum Order Fee Setup';\n    layout { area(Content) { group(General) { field(\"Minimum Order Amount\"; Rec.\"Minimum Order Amount\") { ApplicationArea = All; } field(\"Fee Item No.\"; Rec.\"Fee Item No.\") { ApplicationArea = All; } field(\"Fee Amount\"; Rec.\"Fee Amount\") { ApplicationArea = All; } } } }\n    trigger OnOpenPage()\n    begin\n        if not Rec.Get() then begin\n            Rec.Init();\n            Rec.Insert();\n        end;\n    end;\n}\n\n--- src/PageExt/SalesOrder.PageExt.al ---\npageextension 50100 \"NVK Sales Order\" extends \"Sales Order\"\n{\n    actions\n    {\n        addlast(processing)\n        {\n            action(NVKRecalcMinFee)\n            {\n                Caption = 'Recalculate Minimum Order Fee';\n                ApplicationArea = All;\n                Image = Calculate;\n                trigger OnAction()\n                var\n                    MinFee: Codeunit \"NVK Calc Minimum Order Fee\";\n                begin\n                    MinFee.AddFeeIfBelowMinimum(Rec);\n                end;\n            }\n        }\n    }\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik PTE",
+        "required_headings": ["Minimumorderavgift"],
+        "must_mention": ["Minimum Order Amount", "Fee Item No.", "frisläpp", "Recalculate Minimum Order Fee"],
+        "forbidden": ["KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik PTE\nKundspecifika anpassningar för Nordvik Industri AB. Appen har inga beroenden till andra tillägg.\n\n#### Minimumorderavgift (NVK Calc Minimum Order Fee)\nFunktionen lägger automatiskt till en avgiftsrad på försäljningsorder vars artikelsumma understiger ett konfigurerat minimibelopp. Inställningarna görs på sidan NVK Min. Order Fee Setup (tabellen NVK Min. Order Fee Setup) där konsulten anger Minimum Order Amount, Fee Item No. (artikeln som används för avgiften) och Fee Amount. När en order frisläpps (Release Sales Document, OnAfterReleaseSalesDoc) beräknas summan av orderns artikelrader; ligger den under minimibeloppet skapas en rad med avgiftsartikeln, kvantitet 1 och det angivna beloppet, markerad med fältet NVK Minimum Order Fee. När ordern öppnas igen (OnAfterReopenSalesDoc) tas avgiftsraden bort så att den beräknas på nytt vid nästa frisläppning. Avgiften kan även räknas om manuellt via åtgärden Recalculate Minimum Order Fee på försäljningsordersidan."
+      }
+    },
+    {
+      "id": "CA-02",
+      "agent": "code_analyst",
+      "title": "Subscriber-only codeunit plus install codeunit (Övriga anpassningar, install skipped)",
+      "input": {
+        "mode": "full",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-Sales-PTE", "branch": "main", "head_sha": "b2c3d4e5f6a1", "url": "https://github.com/exempelpartner/Nordvik-Sales-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000002", "name": "Nordvik Sales PTE", "publisher": "Exempelpartner", "version": "27.0.3.0", "brief": "Mindre justeringar av försäljningsflödet", "dependencies": []},
+          "summary": {"al_files": 2, "objects_by_type": {"codeunit": 2}, "logic_codeunits": 0, "subscriber_codeunits": 1, "event_subscribers": 3, "skipped_install_upgrade": ["NVK Install Data"], "source_omitted_for_budget": []},
+          "logic_codeunits": [],
+          "subscriber_codeunits": [
+            {"path": "src/Codeunit/Subscribers.Codeunit.al", "type": "codeunit", "id": 50110, "name": "NVK Subscribers", "archetype": "subscribers", "commented_out": false,
+             "procedures": [{"name": "SetSalespersonFromUser", "public": false}, {"name": "SetLocationOnProdOrder", "public": false}, {"name": "SkipCrMemoApplication", "public": false}],
+             "event_subscribers": [
+               {"object_type": "Table", "object_name": "Sales Header", "event": "OnValidateSellToCustomerNoOnBeforeRecallModifyAddressNotification", "procedure": "SetSalespersonFromUser"},
+               {"object_type": "Table", "object_name": "Production Order", "event": "OnAfterInitRecord", "procedure": "SetLocationOnProdOrder"},
+               {"object_type": "Codeunit", "object_name": "Copy Document Mgt.", "event": "OnBeforeUpdateCustLedgEntry", "procedure": "SkipCrMemoApplication"}]}
+          ],
+          "tables": [], "pages": [], "reports": [], "other_objects": [],
+          "source": "--- src/Codeunit/Subscribers.Codeunit.al ---\ncodeunit 50110 \"NVK Subscribers\"\n{\n    [EventSubscriber(ObjectType::Table, Database::\"Sales Header\", 'OnValidateSellToCustomerNoOnBeforeRecallModifyAddressNotification', '', false, false)]\n    local procedure SetSalespersonFromUser(var SalesHeader: Record \"Sales Header\")\n    var\n        UserSetup: Record \"User Setup\";\n    begin\n        // Nordvik vill att inloggad användare alltid blir säljare på ordern, inte kundens standardsäljare\n        if UserSetup.Get(UserId) and (UserSetup.\"Salespers./Purch. Code\" <> '') then\n            SalesHeader.Validate(\"Salesperson Code\", UserSetup.\"Salespers./Purch. Code\");\n    end;\n\n    [EventSubscriber(ObjectType::Table, Database::\"Production Order\", 'OnAfterInitRecord', '', false, false)]\n    local procedure SetLocationOnProdOrder(var ProductionOrder: Record \"Production Order\")\n    begin\n        if ProductionOrder.\"Location Code\" = '' then\n            ProductionOrder.\"Location Code\" := 'PROD';\n    end;\n\n    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Copy Document Mgt.\", 'OnBeforeUpdateCustLedgEntry', '', false, false)]\n    local procedure SkipCrMemoApplication(var ToSalesHeader: Record \"Sales Header\"; var IsHandled: Boolean)\n    begin\n        // Kreditnotor ska inte kopplas automatiskt mot fakturan vid kopiering\n        IsHandled := true;\n    end;\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik Sales PTE",
+        "required_headings": ["Övriga anpassningar"],
+        "must_mention": ["Salesperson", "PROD", "Copy Document", "SetSalespersonFromUser"],
+        "forbidden": ["Install Data", "KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik Sales PTE\nMindre justeringar av standardflödet för försäljning och produktion hos Nordvik Industri AB. Appen har inga beroenden till andra tillägg.\n\n#### Övriga anpassningar\n- **Aktiv användare som säljare på order** – När kund anges på ett försäljningsdokument sätts säljarkoden från den inloggade användarens User Setup i stället för kundens standardsäljare (`SetSalespersonFromUser`).\n- **Automatiskt lagerställe på produktionsorder** – Nya produktionsorder får lagerställe PROD om inget lagerställe angetts (`SetLocationOnProdOrder`).\n- **Ingen automatisk koppling av kreditnotor** – Vid kopiering av dokument (Copy Document Mgt.) hoppas standardens uppdatering av kundreskontraposten över, så att kreditnotan inte kopplas automatiskt mot fakturan (`SkipCrMemoApplication`)."
+      }
+    },
+    {
+      "id": "CA-03",
+      "agent": "code_analyst",
+      "title": "Commented-out logic codeunit must be flagged as not implemented",
+      "input": {
+        "mode": "full",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-Currency-PTE", "branch": "main", "head_sha": "c3d4e5f6a1b2", "url": "https://github.com/exempelpartner/Nordvik-Currency-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000003", "name": "Nordvik Currency Clause", "publisher": "Exempelpartner", "version": "26.0.0.1", "brief": "Valutaklausul på försäljningsdokument", "dependencies": []},
+          "summary": {"al_files": 2, "objects_by_type": {"codeunit": 1, "tableextension": 1}, "logic_codeunits": 1, "subscriber_codeunits": 0, "event_subscribers": 0, "skipped_install_upgrade": [], "source_omitted_for_budget": []},
+          "logic_codeunits": [{"path": "src/Codeunit/CalculateCurrencyClause.Codeunit.al", "type": "codeunit", "id": 50120, "name": "NVK Calculate Currency Clause", "archetype": "logic", "commented_out": true, "procedures": [], "event_subscribers": []}],
+          "subscriber_codeunits": [],
+          "tables": [{"path": "src/TableExt/SalesHeader.TableExt.al", "type": "tableextension", "id": 50120, "name": "NVK Sales Header", "extends": "Sales Header", "fields": [{"id": 50120, "name": "NVK Currency Clause %", "type": "Decimal"}, {"id": 50121, "name": "NVK Base Exchange Rate", "type": "Decimal"}]}],
+          "pages": [], "reports": [], "other_objects": [],
+          "source": "--- src/Codeunit/CalculateCurrencyClause.Codeunit.al ---\ncodeunit 50120 \"NVK Calculate Currency Clause\"\n{\n    // procedure CalculateClause(var SalesHeader: Record \"Sales Header\")\n    // var\n    //     CurrExchRate: Record \"Currency Exchange Rate\";\n    //     Diff: Decimal;\n    // begin\n    //     Diff := CurrExchRate.ExchangeRate(WorkDate(), SalesHeader.\"Currency Code\") - SalesHeader.\"NVK Base Exchange Rate\";\n    //     if Abs(Diff) / SalesHeader.\"NVK Base Exchange Rate\" * 100 > SalesHeader.\"NVK Currency Clause %\" then\n    //         AddClauseLine(SalesHeader, Diff);\n    // end;\n    //\n    // local procedure AddClauseLine(SalesHeader: Record \"Sales Header\"; Diff: Decimal)\n    // begin\n    //     // TODO: skapa tilläggsrad för valutajustering\n    // end;\n}\n\n--- src/TableExt/SalesHeader.TableExt.al ---\ntableextension 50120 \"NVK Sales Header\" extends \"Sales Header\"\n{\n    fields\n    {\n        field(50120; \"NVK Currency Clause %\"; Decimal) { Caption = 'Currency Clause %'; }\n        field(50121; \"NVK Base Exchange Rate\"; Decimal) { Caption = 'Base Exchange Rate'; }\n    }\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik Currency Clause",
+        "required_headings": ["Valutaklausul"],
+        "must_mention": ["ej är implementerad", "NVK Currency Clause %", "NVK Base Exchange Rate"],
+        "forbidden": ["KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik Currency Clause\nAppen är avsedd att hantera en valutaklausul på försäljningsdokument för Nordvik Industri AB. Inga beroenden till andra tillägg.\n\n#### Valutaklausul (NVK Calculate Currency Clause)\nAvsikten är att jämföra aktuell valutakurs med en baskurs på försäljningshuvudet och lägga till en justeringsrad när avvikelsen överstiger en angiven procentsats. Försäljningshuvudet har utökats med fälten NVK Currency Clause % och NVK Base Exchange Rate för detta ändamål. Hela logiken i codeuniten är dock bortkommenterad. Fungerar ej då logiken ej är implementerad; endast fälten finns i databasen."
+      }
+    },
+    {
+      "id": "CA-04",
+      "agent": "code_analyst",
+      "title": "Processing-only report triggered from a page action (Purchase Order XML)",
+      "input": {
+        "mode": "full",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-Purchase-PTE", "branch": "main", "head_sha": "d4e5f6a1b2c3", "url": "https://github.com/exempelpartner/Nordvik-Purchase-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000004", "name": "Nordvik Purchase PTE", "publisher": "Exempelpartner", "version": "27.1.0.0", "brief": "Inköpsanpassningar", "dependencies": []},
+          "summary": {"al_files": 3, "objects_by_type": {"codeunit": 1, "report": 1, "pageextension": 1}, "logic_codeunits": 1, "subscriber_codeunits": 0, "event_subscribers": 0, "skipped_install_upgrade": [], "source_omitted_for_budget": []},
+          "logic_codeunits": [{"path": "src/Codeunit/PurchOrderXML.Codeunit.al", "type": "codeunit", "id": 50130, "name": "NVK Purch. Order XML", "archetype": "logic", "commented_out": false, "procedures": [{"name": "ExportOrder", "public": true}, {"name": "AddLine", "public": false}], "event_subscribers": []}],
+          "subscriber_codeunits": [], "tables": [],
+          "pages": [{"path": "src/PageExt/PurchaseOrder.PageExt.al", "type": "pageextension", "id": 50130, "name": "NVK Purchase Order", "extends": "Purchase Order", "actions": ["NVKExportXML"]}],
+          "reports": [{"path": "src/Report/ExportPurchOrderXML.Report.al", "type": "report", "id": 50130, "name": "NVK Export Purch. Order XML", "processing_only": true, "procedures": []}],
+          "other_objects": [],
+          "source": "--- src/Codeunit/PurchOrderXML.Codeunit.al ---\ncodeunit 50130 \"NVK Purch. Order XML\"\n{\n    procedure ExportOrder(PurchHeader: Record \"Purchase Header\")\n    var\n        PurchLine: Record \"Purchase Line\";\n        TempBlob: Codeunit \"Temp Blob\";\n        Xml: XmlDocument;\n        Root: XmlElement;\n        OutStr: OutStream;\n        InStr: InStream;\n        FileName: Text;\n    begin\n        PurchHeader.TestField(\"Buy-from Vendor No.\");\n        Xml := XmlDocument.Create();\n        Root := XmlElement.Create('PurchaseOrder');\n        Root.Add(XmlElement.Create('OrderNo', '', PurchHeader.\"No.\"));\n        Root.Add(XmlElement.Create('VendorNo', '', PurchHeader.\"Buy-from Vendor No.\"));\n        Root.Add(XmlElement.Create('OrderDate', '', Format(PurchHeader.\"Order Date\", 0, 9)));\n        PurchLine.SetRange(\"Document Type\", PurchHeader.\"Document Type\");\n        PurchLine.SetRange(\"Document No.\", PurchHeader.\"No.\");\n        PurchLine.SetRange(Type, PurchLine.Type::Item);\n        if PurchLine.FindSet() then\n            repeat\n                AddLine(Root, PurchLine);\n            until PurchLine.Next() = 0;\n        Xml.Add(Root);\n        TempBlob.CreateOutStream(OutStr, TextEncoding::UTF8);\n        Xml.WriteTo(OutStr);\n        TempBlob.CreateInStream(InStr);\n        FileName := StrSubstNo('PO_%1.xml', PurchHeader.\"No.\");\n        DownloadFromStream(InStr, '', '', '', FileName);\n    end;\n\n    local procedure AddLine(var Root: XmlElement; PurchLine: Record \"Purchase Line\")\n    var\n        Line: XmlElement;\n    begin\n        Line := XmlElement.Create('Line');\n        Line.Add(XmlElement.Create('ItemNo', '', PurchLine.\"Vendor Item No.\"));\n        Line.Add(XmlElement.Create('Quantity', '', Format(PurchLine.Quantity, 0, 9)));\n        Line.Add(XmlElement.Create('UnitCost', '', Format(PurchLine.\"Direct Unit Cost\", 0, 9)));\n        Root.Add(Line);\n    end;\n}\n\n--- src/Report/ExportPurchOrderXML.Report.al ---\nreport 50130 \"NVK Export Purch. Order XML\"\n{\n    ProcessingOnly = true;\n    Caption = 'Export Purchase Order XML';\n    dataset\n    {\n        dataitem(PurchHeader; \"Purchase Header\")\n        {\n            DataItemTableView = where(\"Document Type\" = const(Order));\n            RequestFilterFields = \"No.\";\n            trigger OnAfterGetRecord()\n            var\n                Exporter: Codeunit \"NVK Purch. Order XML\";\n            begin\n                Exporter.ExportOrder(PurchHeader);\n            end;\n        }\n    }\n}\n\n--- src/PageExt/PurchaseOrder.PageExt.al ---\npageextension 50130 \"NVK Purchase Order\" extends \"Purchase Order\"\n{\n    actions\n    {\n        addlast(processing)\n        {\n            action(NVKExportXML)\n            {\n                Caption = 'Export XML to Vendor';\n                ApplicationArea = All;\n                Image = ExportFile;\n                trigger OnAction()\n                var\n                    Exporter: Codeunit \"NVK Purch. Order XML\";\n                begin\n                    Exporter.ExportOrder(Rec);\n                end;\n            }\n        }\n    }\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik Purchase PTE",
+        "required_headings": ["XML"],
+        "must_mention": ["Export XML to Vendor", "Vendor Item No.", "PO_"],
+        "forbidden": ["KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik Purchase PTE\nInköpsanpassningar för Nordvik Industri AB. Inga beroenden till andra tillägg.\n\n#### Export av inköpsorder som XML (NVK Purch. Order XML)\nFunktionen skapar en XML-fil av en inköpsorder för att skicka beställningen till leverantören. Filen innehåller ordernummer, leverantörsnummer och orderdatum samt en rad per artikelrad med leverantörens artikelnummer (Vendor Item No.), kvantitet och direkt enhetskostnad. Filen laddas ned till användarens dator med namnet PO_<ordernr>.xml. Exporten startas via åtgärden Export XML to Vendor på inköpsordersidan eller via den processande rapporten NVK Export Purch. Order XML, där användaren filtrerar på ordernummer."
+      }
+    },
+    {
+      "id": "CA-05",
+      "agent": "code_analyst",
+      "title": "API page with API properties, table extension and setup page",
+      "input": {
+        "mode": "full",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-API-PTE", "branch": "main", "head_sha": "e5f6a1b2c3d4", "url": "https://github.com/exempelpartner/Nordvik-API-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000005", "name": "Nordvik API PTE", "publisher": "Exempelpartner", "version": "27.0.0.0", "brief": "API för artikelimport från PIM", "dependencies": [{"name": "Nordvik PTE", "publisher": "Exempelpartner", "version": "27.0.0.0"}]},
+          "summary": {"al_files": 3, "objects_by_type": {"page": 2, "tableextension": 1, "table": 1}, "logic_codeunits": 0, "subscriber_codeunits": 0, "event_subscribers": 0, "skipped_install_upgrade": [], "source_omitted_for_budget": []},
+          "logic_codeunits": [], "subscriber_codeunits": [],
+          "tables": [
+            {"path": "src/TableExt/Item.TableExt.al", "type": "tableextension", "id": 50140, "name": "NVK Item", "extends": "Item", "fields": [{"id": 50140, "name": "NVK PIM Id", "type": "Text[50]"}, {"id": 50141, "name": "NVK Last PIM Sync", "type": "DateTime"}]},
+            {"path": "src/Table/PIMSetup.Table.al", "type": "table", "id": 50140, "name": "NVK PIM Setup", "fields": [{"id": 1, "name": "Primary Key", "type": "Code[10]"}, {"id": 10, "name": "Default Item Category", "type": "Code[20]"}, {"id": 11, "name": "Block New Items", "type": "Boolean"}]}
+          ],
+          "pages": [
+            {"path": "src/Page/ItemAPI.Page.al", "type": "page", "id": 50140, "name": "NVK Item API", "page_type": "API", "source_table": "Item", "actions": [], "api": {"apipublisher": "exempelpartner", "apigroup": "nordvik", "apiversion": "v1.0", "entityname": "itemImport", "entitysetname": "itemsImport"}},
+            {"path": "src/Page/PIMSetup.Page.al", "type": "page", "id": 50141, "name": "NVK PIM Setup", "page_type": "Card", "source_table": "NVK PIM Setup", "actions": []}
+          ],
+          "reports": [], "other_objects": [],
+          "source": "--- src/Page/ItemAPI.Page.al ---\npage 50140 \"NVK Item API\"\n{\n    PageType = API;\n    APIPublisher = 'exempelpartner';\n    APIGroup = 'nordvik';\n    APIVersion = 'v1.0';\n    EntityName = 'itemImport';\n    EntitySetName = 'itemsImport';\n    SourceTable = Item;\n    ODataKeyFields = SystemId;\n    DelayedInsert = true;\n    InsertAllowed = true;\n    layout { area(Content) { repeater(Group) {\n        field(id; Rec.SystemId) { }\n        field(number; Rec.\"No.\") { }\n        field(description; Rec.Description) { }\n        field(baseUnitOfMeasure; Rec.\"Base Unit of Measure\") { }\n        field(pimId; Rec.\"NVK PIM Id\") { }\n        field(blocked; Rec.Blocked) { }\n    } } }\n    trigger OnInsertRecord(BelowxRec: Boolean): Boolean\n    var\n        Setup: Record \"NVK PIM Setup\";\n    begin\n        if Setup.Get() then begin\n            if Rec.\"Item Category Code\" = '' then\n                Rec.Validate(\"Item Category Code\", Setup.\"Default Item Category\");\n            if Setup.\"Block New Items\" then\n                Rec.Blocked := true;\n        end;\n        Rec.\"NVK Last PIM Sync\" := CurrentDateTime();\n    end;\n}\n\n--- src/TableExt/Item.TableExt.al ---\ntableextension 50140 \"NVK Item\" extends Item\n{\n    fields\n    {\n        field(50140; \"NVK PIM Id\"; Text[50]) { Caption = 'PIM Id'; }\n        field(50141; \"NVK Last PIM Sync\"; DateTime) { Caption = 'Last PIM Sync'; Editable = false; }\n    }\n}\n\n--- src/Table/PIMSetup.Table.al ---\ntable 50140 \"NVK PIM Setup\"\n{\n    fields\n    {\n        field(1; \"Primary Key\"; Code[10]) { }\n        field(10; \"Default Item Category\"; Code[20]) { TableRelation = \"Item Category\"; }\n        field(11; \"Block New Items\"; Boolean) { }\n    }\n    keys { key(PK; \"Primary Key\") { Clustered = true; } }\n}\n\n--- src/Page/PIMSetup.Page.al ---\npage 50141 \"NVK PIM Setup\"\n{\n    PageType = Card;\n    SourceTable = \"NVK PIM Setup\";\n    UsageCategory = Administration;\n    ApplicationArea = All;\n    Caption = 'PIM Setup';\n    layout { area(Content) { group(General) { field(\"Default Item Category\"; Rec.\"Default Item Category\") { ApplicationArea = All; } field(\"Block New Items\"; Rec.\"Block New Items\") { ApplicationArea = All; } } } }\n    trigger OnOpenPage()\n    begin\n        if not Rec.Get() then begin Rec.Init(); Rec.Insert(); end;\n    end;\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik API PTE",
+        "required_headings": ["API"],
+        "must_mention": ["exempelpartner", "nordvik", "v1.0", "itemsImport", "NVK PIM Id", "Default Item Category", "Block New Items", "Nordvik PTE"],
+        "forbidden": ["KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik API PTE\nAppen exponerar ett API för import av artiklar från Nordviks PIM-system till Business Central. Appen är beroende av Nordvik PTE.\n\n#### API för artikelimport (NVK Item API)\nEn API-sida exponerar artikeltabellen under APIPublisher exempelpartner, APIGroup nordvik, version v1.0 med entiteten itemImport (entitetsmängd itemsImport). SystemId används som nyckel och insättning är tillåten. Fälten som exponeras är id, artikelnummer, beskrivning, basenhet, PIM-id och spärrad. När en artikel skapas via API:t sätts artikelkategori från inställningen Default Item Category om ingen kategori angivits, artikeln spärras om Block New Items är aktiverat, och tidsstämpeln NVK Last PIM Sync uppdateras.\n\n#### Inställningar för PIM-integration (NVK PIM Setup)\nInställningssidan NVK PIM Setup (tabellen NVK PIM Setup) innehåller Default Item Category och Block New Items. Posten skapas automatiskt när sidan öppnas första gången.\n\n#### Nya fält på artikel\nArtikeltabellen har utökats med NVK PIM Id (externt id från PIM) och NVK Last PIM Sync (senaste synk, ej redigerbart)."
+      }
+    },
+    {
+      "id": "CA-06",
+      "agent": "code_analyst",
+      "title": "Update mode: integrate a new logic codeunit and keep unchanged text",
+      "input": {
+        "mode": "update",
+        "current_doc": "### Nordvik PTE\nKundspecifika anpassningar för Nordvik Industri AB. Appen har inga beroenden till andra tillägg.\n\n#### Minimumorderavgift (NVK Calc Minimum Order Fee)\nFunktionen lägger automatiskt till en avgiftsrad på försäljningsorder vars artikelsumma understiger ett konfigurerat minimibelopp. Inställningarna görs på sidan NVK Min. Order Fee Setup där konsulten anger Minimum Order Amount, Fee Item No. och Fee Amount. Avgiftsraden läggs till när ordern frisläpps och tas bort när ordern öppnas igen.",
+        "change_summary": "{\n  \"impact\": \"major\",\n  \"version_before\": \"27.2.0.0\",\n  \"version_after\": \"27.3.0.0\",\n  \"affected_features\": [\"Kreditlimitkontroll\"],\n  \"new_objects\": [\"codeunit NVK Custom Credit Limit Mgt.\", \"tableextension NVK Customer\"],\n  \"removed_objects\": [],\n  \"requires_full_regeneration\": false,\n  \"pull_requests\": [51],\n  \"summary_sv\": \"Ny kreditlimitkontroll som spärrar frisläppning av order när kundens saldo överstiger en egen limit.\"\n}\n\n#### 2026-09-10 – version 27.2.0.0 → 27.3.0.0\n**Nya funktioner**\n- Kreditlimitkontroll: Ny codeunit NVK Custom Credit Limit Mgt. stoppar frisläppning av försäljningsorder när kundens saldo inklusive ordern överstiger fältet NVK Custom Credit Limit på kundkortet (PR #51)",
+        "analysis": {
+          "repository": {"org": "exempelpartner", "repo": "Nordvik-PTE", "branch": "main", "head_sha": "f6a1b2c3d4e5", "url": "https://github.com/exempelpartner/Nordvik-PTE"},
+          "app": {"id": "6f1c2c1e-0000-4000-8000-000000000001", "name": "Nordvik PTE", "publisher": "Exempelpartner", "version": "27.3.0.0", "brief": "Kundanpassningar för Nordvik Industri AB", "dependencies": []},
+          "summary": {"al_files": 6, "objects_by_type": {"codeunit": 2, "table": 1, "page": 1, "pageextension": 1, "tableextension": 1}, "logic_codeunits": 2, "subscriber_codeunits": 0, "event_subscribers": 3, "skipped_install_upgrade": [], "source_omitted_for_budget": []},
+          "logic_codeunits": [
+            {"path": "src/Codeunit/CalcMinimumOrderFee.Codeunit.al", "type": "codeunit", "id": 50100, "name": "NVK Calc Minimum Order Fee", "archetype": "logic", "commented_out": false, "procedures": [{"name": "AddFeeIfBelowMinimum", "public": true}, {"name": "RemoveFee", "public": true}], "event_subscribers": [{"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnAfterReleaseSalesDoc", "procedure": "OnAfterReleaseSalesDoc"}, {"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnAfterReopenSalesDoc", "procedure": "OnAfterReopenSalesDoc"}]},
+            {"path": "src/Codeunit/CustomCreditLimitMgt.Codeunit.al", "type": "codeunit", "id": 50101, "name": "NVK Custom Credit Limit Mgt.", "archetype": "logic", "commented_out": false, "procedures": [{"name": "CheckCreditLimit", "public": true}, {"name": "OnBeforeReleaseSalesDoc", "public": false}], "event_subscribers": [{"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnBeforeReleaseSalesDoc", "procedure": "OnBeforeReleaseSalesDoc"}]}
+          ],
+          "subscriber_codeunits": [],
+          "tables": [
+            {"path": "src/Table/MinOrderFeeSetup.Table.al", "type": "table", "id": 50100, "name": "NVK Min. Order Fee Setup", "fields": [{"id": 10, "name": "Minimum Order Amount", "type": "Decimal"}, {"id": 11, "name": "Fee Item No.", "type": "Code[20]"}, {"id": 12, "name": "Fee Amount", "type": "Decimal"}]},
+            {"path": "src/TableExt/Customer.TableExt.al", "type": "tableextension", "id": 50101, "name": "NVK Customer", "extends": "Customer", "fields": [{"id": 50101, "name": "NVK Custom Credit Limit", "type": "Decimal"}]}
+          ],
+          "pages": [{"path": "src/Page/MinOrderFeeSetup.Page.al", "type": "page", "id": 50100, "name": "NVK Min. Order Fee Setup", "page_type": "Card", "source_table": "NVK Min. Order Fee Setup", "actions": []}, {"path": "src/PageExt/SalesOrder.PageExt.al", "type": "pageextension", "id": 50100, "name": "NVK Sales Order", "extends": "Sales Order", "actions": ["NVKRecalcMinFee"]}],
+          "reports": [], "other_objects": [],
+          "source": "--- src/Codeunit/CustomCreditLimitMgt.Codeunit.al ---\ncodeunit 50101 \"NVK Custom Credit Limit Mgt.\"\n{\n    procedure CheckCreditLimit(SalesHeader: Record \"Sales Header\")\n    var\n        Customer: Record Customer;\n        Balance: Decimal;\n    begin\n        Customer.Get(SalesHeader.\"Bill-to Customer No.\");\n        if Customer.\"NVK Custom Credit Limit\" = 0 then\n            exit;\n        Customer.CalcFields(\"Balance (LCY)\");\n        SalesHeader.CalcFields(\"Amount Including VAT\");\n        Balance := Customer.\"Balance (LCY)\" + SalesHeader.\"Amount Including VAT\";\n        if Balance > Customer.\"NVK Custom Credit Limit\" then\n            Error('Kundens saldo %1 överstiger den egna kreditlimiten %2. Ordern kan inte frisläppas.', Balance, Customer.\"NVK Custom Credit Limit\");\n    end;\n\n    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Release Sales Document\", 'OnBeforeReleaseSalesDoc', '', false, false)]\n    local procedure OnBeforeReleaseSalesDoc(var SalesHeader: Record \"Sales Header\")\n    begin\n        if SalesHeader.\"Document Type\" = SalesHeader.\"Document Type\"::Order then\n            CheckCreditLimit(SalesHeader);\n    end;\n}\n\n--- src/TableExt/Customer.TableExt.al ---\ntableextension 50101 \"NVK Customer\" extends Customer\n{\n    fields\n    {\n        field(50101; \"NVK Custom Credit Limit\"; Decimal) { Caption = 'Custom Credit Limit'; }\n    }\n}\n\n--- src/Codeunit/CalcMinimumOrderFee.Codeunit.al ---\ncodeunit 50100 \"NVK Calc Minimum Order Fee\"\n{\n    // unchanged — see CA-01\n    procedure AddFeeIfBelowMinimum(var SalesHeader: Record \"Sales Header\") begin end;\n    procedure RemoveFee(var SalesHeader: Record \"Sales Header\") begin end;\n}\n"
+        }
+      },
+      "expected": {
+        "starts_with": "### Nordvik PTE",
+        "required_headings": ["Minimumorderavgift", "Kreditlimit"],
+        "must_mention": ["NVK Custom Credit Limit", "frisläpp", "Minimum Order Amount"],
+        "forbidden": ["Ändringshistorik", "KRÄVER MANUELL KOMPLETTERING", "```"],
+        "language": "sv",
+        "reference_response_sv": "### Nordvik PTE\nKundspecifika anpassningar för Nordvik Industri AB. Appen har inga beroenden till andra tillägg.\n\n#### Minimumorderavgift (NVK Calc Minimum Order Fee)\nFunktionen lägger automatiskt till en avgiftsrad på försäljningsorder vars artikelsumma understiger ett konfigurerat minimibelopp. Inställningarna görs på sidan NVK Min. Order Fee Setup där konsulten anger Minimum Order Amount, Fee Item No. och Fee Amount. Avgiftsraden läggs till när ordern frisläpps och tas bort när ordern öppnas igen.\n\n#### Kreditlimitkontroll (NVK Custom Credit Limit Mgt.)\nKundkortet har utökats med fältet NVK Custom Credit Limit. När en försäljningsorder frisläpps (Release Sales Document, OnBeforeReleaseSalesDoc) summeras kundens saldo i lokal valuta med orderns belopp inklusive moms; överstiger summan den egna kreditlimiten stoppas frisläppningen med ett felmeddelande. Är fältet noll görs ingen kontroll."
+      }
+    },
+    {
+      "id": "CT-01",
+      "agent": "change_tracker",
+      "title": "Minor change: new field on an existing table extension via one PR",
+      "input": {
+        "changes": {
+          "org": "exempelpartner", "repo": "Nordvik-Contract-PTE", "branch": "main",
+          "base_sha": "1111111aaaaaaa", "head_sha": "2222222bbbbbbb", "base_date": "2026-08-20T09:00:00Z", "head_date": "2026-09-05T14:30:00Z",
+          "app_version_before": "27.0.0.0", "app_version_after": "27.0.1.0", "total_commits": 2,
+          "commits": [
+            {"sha": "2222222bbb", "date": "2026-09-05T14:30:00Z", "author": "Anna Dev", "message": "Merge pull request #42 from exempelpartner/feature/reseller-field\n\nLägg till fält Reseller på kontraktsrad"},
+            {"sha": "3333333ccc", "date": "2026-09-05T13:10:00Z", "author": "Anna Dev", "message": "Lägg till NVK Reseller Name på eCom CB Contract Line och visa i kontraktskortet"}
+          ],
+          "pull_requests": [{"number": 42, "title": "Lägg till fält Reseller på kontraktsrad", "body": "Kunden vill kunna se återförsäljare per kontraktsrad i kontraktskortet. Fältet fylls manuellt tills integrationen mot CRM är klar.", "merged_at": "2026-09-05T14:30:00Z", "author": "anna-dev", "labels": ["enhancement"], "url": "https://github.com/exempelpartner/Nordvik-Contract-PTE/pull/42"}],
+          "files": [
+            {"path": "app.json", "status": "modified", "additions": 1, "deletions": 1, "doc_relevant": true, "patch": "-  \"version\": \"27.0.0.0\",\n+  \"version\": \"27.0.1.0\","},
+            {"path": "src/TableExt/ContractLine.TableExt.al", "status": "modified", "additions": 1, "deletions": 0, "doc_relevant": true, "patch": "@@ -6,4 +6,5 @@\n         field(50200; \"NVK Persistent Key\"; Guid) { }\n+        field(50201; \"NVK Reseller Name\"; Text[50]) { Caption = 'Reseller Name'; }\n     }", "object": {"type": "tableextension", "id": 50200, "name": "NVK Contract Line", "extends": "eCom CB Contract Line", "archetype": null}},
+            {"path": "src/PageExt/ContractCard.PageExt.al", "status": "modified", "additions": 1, "deletions": 0, "doc_relevant": true, "patch": "@@ -10,3 +10,4 @@\n             field(\"NVK Persistent Key\"; Rec.\"NVK Persistent Key\") { ApplicationArea = All; }\n+            field(\"NVK Reseller Name\"; Rec.\"NVK Reseller Name\") { ApplicationArea = All; }", "object": {"type": "pageextension", "id": 50200, "name": "NVK Contract Card", "extends": "eCom CB Contract", "archetype": null}}
+          ],
+          "summary": {"files_changed": 3, "al_files_changed": 2, "doc_relevant_files": 3, "added": [], "removed": []}
+        }
+      },
+      "expected": {
+        "impact": "minor",
+        "requires_full_regeneration": false,
+        "version_after": "27.0.1.0",
+        "must_mention": ["NVK Reseller Name", "#42", "27.0.1.0"],
+        "changelog_heading_prefix": "#### 2026-09-05",
+        "language": "sv",
+        "reference_response_sv": "```json\n{\"impact\": \"minor\", \"version_before\": \"27.0.0.0\", \"version_after\": \"27.0.1.0\", \"affected_features\": [\"Kontraktsradsfält\"], \"new_objects\": [], \"removed_objects\": [], \"changed_dependencies\": [], \"requires_full_regeneration\": false, \"pull_requests\": [42], \"summary_sv\": \"Nytt fält NVK Reseller Name på kontraktsrader som visas i kontraktskortet.\"}\n```\n#### 2026-09-05 – version 27.0.0.0 → 27.0.1.0\n**Ändringar**\n- Kontraktsradsfält: Nytt fält NVK Reseller Name (Text[50]) på eCom CB Contract Line, visas i kontraktskortet. Kunden vill se återförsäljare per kontraktsrad; fältet fylls manuellt tills CRM-integrationen är klar (PR #42)"
+      }
+    },
+    {
+      "id": "CT-02",
+      "agent": "change_tracker",
+      "title": "Major change: new logic codeunit, new table extension and a new dependency",
+      "input": {
+        "changes": {
+          "org": "exempelpartner", "repo": "Nordvik-PTE", "branch": "main",
+          "base_sha": "a1b2c3d4e5f6", "head_sha": "f6a1b2c3d4e5", "base_date": "2026-08-01T08:00:00Z", "head_date": "2026-09-10T11:00:00Z",
+          "app_version_before": "27.2.0.0", "app_version_after": "27.3.0.0", "total_commits": 5,
+          "commits": [
+            {"sha": "f6a1b2c3d4", "date": "2026-09-10T11:00:00Z", "author": "Erik Dev", "message": "Merge pull request #51 from exempelpartner/feature/credit-limit\n\nKreditlimitkontroll vid frisläppning"},
+            {"sha": "9999999ddd", "date": "2026-09-08T16:00:00Z", "author": "Erik Dev", "message": "Lägg till SweBase-beroende för PEB-fält"}
+          ],
+          "pull_requests": [{"number": 51, "title": "Kreditlimitkontroll vid frisläppning", "body": "Nordvik vill stoppa frisläppning av order när kundens saldo inkl. ordern överstiger en egen kreditlimit (separat från standardens Credit Limit (LCY) som används för varningar). Nytt fält NVK Custom Credit Limit på kundkortet.", "merged_at": "2026-09-10T11:00:00Z", "author": "erik-dev", "labels": ["feature"], "url": "https://github.com/exempelpartner/Nordvik-PTE/pull/51"}],
+          "files": [
+            {"path": "app.json", "status": "modified", "additions": 7, "deletions": 1, "doc_relevant": true, "patch": "-  \"version\": \"27.2.0.0\",\n+  \"version\": \"27.3.0.0\",\n+  \"dependencies\": [\n+    { \"id\": \"aaaa-bbbb\", \"name\": \"SweBase\", \"publisher\": \"Programekonomi Svenska AB\", \"version\": \"27.0.0.0\" }\n+  ],"},
+            {"path": "src/Codeunit/CustomCreditLimitMgt.Codeunit.al", "status": "added", "additions": 28, "deletions": 0, "doc_relevant": true, "patch": "+codeunit 50101 \"NVK Custom Credit Limit Mgt.\"\n+{\n+    procedure CheckCreditLimit(SalesHeader: Record \"Sales Header\") ...\n+    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Release Sales Document\", 'OnBeforeReleaseSalesDoc', '', false, false)]\n+    local procedure OnBeforeReleaseSalesDoc(var SalesHeader: Record \"Sales Header\") ...\n+}", "object": {"type": "codeunit", "id": 50101, "name": "NVK Custom Credit Limit Mgt.", "archetype": "logic", "commented_out": false, "event_subscribers": [{"object_type": "Codeunit", "object_name": "Release Sales Document", "event": "OnBeforeReleaseSalesDoc", "procedure": "OnBeforeReleaseSalesDoc"}]}},
+            {"path": "src/TableExt/Customer.TableExt.al", "status": "added", "additions": 8, "deletions": 0, "doc_relevant": true, "patch": "+tableextension 50101 \"NVK Customer\" extends Customer\n+{\n+    fields { field(50101; \"NVK Custom Credit Limit\"; Decimal) { Caption = 'Custom Credit Limit'; } }\n+}", "object": {"type": "tableextension", "id": 50101, "name": "NVK Customer", "extends": "Customer", "archetype": null}},
+            {"path": "src/PageExt/CustomerCard.PageExt.al", "status": "added", "additions": 9, "deletions": 0, "doc_relevant": true, "object": {"type": "pageextension", "id": 50101, "name": "NVK Customer Card", "extends": "Customer Card", "archetype": null}},
+            {"path": "README.md", "status": "modified", "additions": 3, "deletions": 0, "doc_relevant": false}
+          ],
+          "summary": {"files_changed": 5, "al_files_changed": 3, "doc_relevant_files": 4, "added": ["src/Codeunit/CustomCreditLimitMgt.Codeunit.al", "src/TableExt/Customer.TableExt.al", "src/PageExt/CustomerCard.PageExt.al"], "removed": []}
+        }
+      },
+      "expected": {
+        "impact": "major",
+        "requires_full_regeneration": true,
+        "version_after": "27.3.0.0",
+        "must_mention": ["NVK Custom Credit Limit Mgt.", "SweBase", "#51"],
+        "changelog_heading_prefix": "#### 2026-09-10",
+        "language": "sv",
+        "reference_response_sv": "```json\n{\"impact\": \"major\", \"version_before\": \"27.2.0.0\", \"version_after\": \"27.3.0.0\", \"affected_features\": [\"Kreditlimitkontroll\"], \"new_objects\": [\"codeunit NVK Custom Credit Limit Mgt.\", \"tableextension NVK Customer\", \"pageextension NVK Customer Card\"], \"removed_objects\": [], \"changed_dependencies\": [\"SweBase 27.0.0.0 (ny)\"], \"requires_full_regeneration\": true, \"pull_requests\": [51], \"summary_sv\": \"Ny kreditlimitkontroll som stoppar frisläppning av order när kundens saldo överstiger en egen kreditlimit; nytt beroende till SweBase.\"}\n```\n#### 2026-09-10 – version 27.2.0.0 → 27.3.0.0\n**Nya funktioner**\n- Kreditlimitkontroll: Ny codeunit NVK Custom Credit Limit Mgt. stoppar frisläppning av försäljningsorder när kundens saldo inklusive ordern överstiger det nya fältet NVK Custom Credit Limit på kundkortet, separat från standardens kreditlimit som endast varnar (PR #51)\n\n**Tekniskt**\n- Nytt beroende till SweBase 27.0.0.0 (Programekonomi Svenska AB) (commit 9999999)"
+      }
+    },
+    {
+      "id": "CT-03",
+      "agent": "change_tracker",
+      "title": "No functional change: version bump and pipeline files only",
+      "input": {
+        "changes": {
+          "org": "exempelpartner", "repo": "Nordvik-Sales-PTE", "branch": "main",
+          "base_sha": "b2c3d4e5f6a1", "head_sha": "c0ffee000001", "base_date": "2026-09-01T08:00:00Z", "head_date": "2026-09-12T07:45:00Z",
+          "app_version_before": "27.0.3.0", "app_version_after": "27.0.4.0", "total_commits": 2,
+          "commits": [
+            {"sha": "c0ffee0000", "date": "2026-09-12T07:45:00Z", "author": "CI Bot", "message": "Bump version to 27.0.4.0 for BC27 CU3 compatibility build"},
+            {"sha": "abcdef0000", "date": "2026-09-11T10:00:00Z", "author": "Anna Dev", "message": "Uppdatera AL-Go workflows och README"}
+          ],
+          "pull_requests": [],
+          "files": [
+            {"path": "app.json", "status": "modified", "additions": 1, "deletions": 1, "doc_relevant": true, "patch": "-  \"version\": \"27.0.3.0\",\n+  \"version\": \"27.0.4.0\","},
+            {"path": ".github/workflows/CICD.yaml", "status": "modified", "additions": 12, "deletions": 4, "doc_relevant": false},
+            {"path": "README.md", "status": "modified", "additions": 2, "deletions": 1, "doc_relevant": false}
+          ],
+          "summary": {"files_changed": 3, "al_files_changed": 0, "doc_relevant_files": 1, "added": [], "removed": []}
+        }
+      },
+      "expected": {
+        "impact": "none",
+        "requires_full_regeneration": false,
+        "version_after": "27.0.4.0",
+        "must_mention": ["27.0.4.0"],
+        "changelog_heading_prefix": "#### 2026-09-12",
+        "language": "sv",
+        "reference_response_sv": "```json\n{\"impact\": \"none\", \"version_before\": \"27.0.3.0\", \"version_after\": \"27.0.4.0\", \"affected_features\": [], \"new_objects\": [], \"removed_objects\": [], \"changed_dependencies\": [], \"requires_full_regeneration\": false, \"pull_requests\": [], \"summary_sv\": \"Endast versionsuppräkning till 27.0.4.0 och uppdaterade pipeline-filer; ingen funktionell ändring.\"}\n```\n#### 2026-09-12 – commit c0ffee0\n- Inga funktionella ändringar (endast versionsuppräkning till 27.0.4.0 samt uppdaterade AL-Go-workflows och README)"
+      }
+    }
+  ]
+}

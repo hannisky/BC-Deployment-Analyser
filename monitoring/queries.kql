@@ -1,0 +1,76 @@
+// monitoring/queries.kql — Log Analytics queries for the BC Deployment Analyzer
+// Open: Azure portal → Application Insights → Logs, paste a query, set the time range.
+// Business spans are exported as `dependencies` rows; their bc.* attributes live in customDimensions.
+
+// ---------------------------------------------------------------------------------------------
+// 1. Pipeline runs — one row per run with the KPIs recorded by run_pipeline.py
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.run"
+| project timestamp, duration_s = todouble(customDimensions["bc.duration_s"]),
+          repos = toint(customDimensions["bc.repos"]), documented = toint(customDimensions["bc.documented"]),
+          updated = toint(customDimensions["bc.updated"]), skipped = toint(customDimensions["bc.skipped"]),
+          failed = toint(customDimensions["bc.failed"]),
+          tokens_in = tolong(customDimensions["bc.tokens_in"]), tokens_out = tolong(customDimensions["bc.tokens_out"])
+| order by timestamp desc
+
+// ---------------------------------------------------------------------------------------------
+// 2. Token cost per customer (last 30 days) — which customers drive the LLM bill?
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.repo" and timestamp > ago(30d)
+| extend customer = tostring(customDimensions["bc.customer"]),
+         tokens_in = tolong(customDimensions["bc.tokens_in"]), tokens_out = tolong(customDimensions["bc.tokens_out"])
+| summarize repos = count(), tokens_in = sum(tokens_in), tokens_out = sum(tokens_out),
+            avg_duration_s = avg(todouble(customDimensions["bc.duration_s"])) by customer
+| order by tokens_in desc
+
+// ---------------------------------------------------------------------------------------------
+// 3. Mode distribution — how often do we skip / update / regenerate? (efficiency of the SHA check)
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.repo" and timestamp > ago(30d)
+| summarize count() by mode = tostring(customDimensions["bc.mode"]), bin(timestamp, 1d)
+| render columnchart
+
+// ---------------------------------------------------------------------------------------------
+// 4. Change impact verdicts from bc-change-tracker — are PRs mostly minor or major?
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.repo" and isnotempty(customDimensions["bc.impact"])
+| summarize count() by impact = tostring(customDimensions["bc.impact"]), repo = tostring(customDimensions["bc.repo"])
+| order by count_ desc
+
+// ---------------------------------------------------------------------------------------------
+// 5. Slowest repositories — candidates for the source budget (MAX_AL_CHARS) or splitting
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.repo" and timestamp > ago(30d)
+| project timestamp, customer = tostring(customDimensions["bc.customer"]), repo = tostring(customDimensions["bc.repo"]),
+          duration_s = todouble(customDimensions["bc.duration_s"]), section_chars = toint(customDimensions["bc.section_chars"])
+| top 20 by duration_s desc
+
+// ---------------------------------------------------------------------------------------------
+// 6. GenAI spans per agent — model latency, tokens and errors as recorded by the Foundry SDK
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where timestamp > ago(7d) and (customDimensions["gen_ai.agent.name"] has "bc-" or name has "bc-code-analyst" or name has "bc-change-tracker")
+| extend agent = coalesce(tostring(customDimensions["gen_ai.agent.name"]), name)
+| summarize runs = count(), errors = countif(success == false), p50_ms = percentile(duration, 50), p95_ms = percentile(duration, 95),
+            tokens_in = sum(tolong(customDimensions["gen_ai.usage.input_tokens"])), tokens_out = sum(tolong(customDimensions["gen_ai.usage.output_tokens"])) by agent
+
+// ---------------------------------------------------------------------------------------------
+// 7. Tool call health — analyze_repo / get_repo_changes failures and duration
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where timestamp > ago(7d) and (name has "analyze_repo" or name has "get_repo_changes" or tostring(customDimensions["gen_ai.tool.name"]) in ("analyze_repo", "get_repo_changes"))
+| extend tool = coalesce(tostring(customDimensions["gen_ai.tool.name"]), name)
+| summarize calls = count(), failed = countif(success == false), avg_ms = avg(duration) by tool
+
+// ---------------------------------------------------------------------------------------------
+// 8. Alert candidate — any failed repo in the last run
+// ---------------------------------------------------------------------------------------------
+dependencies
+| where name == "bc.pipeline.run" and timestamp > ago(1d)
+| where toint(customDimensions["bc.failed"]) > 0
+| project timestamp, failed = toint(customDimensions["bc.failed"]), customers = tostring(customDimensions["bc.customers"])

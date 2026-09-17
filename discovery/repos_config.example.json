@@ -1,0 +1,20 @@
+{
+  "_comment": "Customer inventory. Copy to repos_config.json (gitignored). discover_repos.py fills repos[]; discover_bc_extensions.py only READS this file and writes its own output per BC environment.",
+  "generated_at": null,
+  "customers": [
+    {
+      "name": "Exempelkund AB",
+      "search_prefix": "exempelkund",
+      "org": "your-github-org",
+      "enabled": true,
+      "bc_environments": [
+        {
+          "tenant_id": "00000000-0000-0000-0000-000000000000",
+          "environment": "Production",
+          "company_name": "Exempelkund AB"
+        }
+      ],
+      "repos": []
+    }
+  ]
+}
