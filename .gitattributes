@@ -1,0 +1,11 @@
+# Keep scripts and source LF everywhere — CRLF breaks `bash setup/deploy.sh` on Windows checkouts
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.yml text eol=lf
+*.kql text eol=lf
+*.png binary
+*.jpg binary
